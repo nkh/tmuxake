@@ -1,0 +1,12 @@
+tmuxake
+-------
+
+full-size side-pane, one that takes over the root pane
+
+Attach and detach side-panes, this allows for cross session
+	side-panes 
+
+tweek the size of root-panes after side-panes are hidden, it is
+	sometimes difficult to understand how tmux resize panes
+	when a pane is closed
+

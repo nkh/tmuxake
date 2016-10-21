@@ -1,0 +1,788 @@
+#!/bin/bash
+
+# tmuxake is run if the script is run with an argument, have a look at the end of the file
+
+tmuxake-session-name() { echo "tmuxake" ; }
+tmuxake-is-source() { echo "÷ " ; }
+tmuxake-is-mirror() { echo "§ " ; }
+
+#set -euo pipefail
+
+r_shape="-h -p 60"
+l_shape="$r_shape -b"
+b_shape="-v -p 30"
+t_shape="$b_shape -b"
+
+warn() { echo "$*" >&2; }
+
+parse_it () 
+{
+parse_it_regex=$1
+parse_it_string=$2
+shift 2
+
+[[ $parse_it_string =~ $parse_it_regex ]] || return 
+
+i=1
+for parse_it_name; do
+	declare -g "$parse_it_name=${BASH_REMATCH[i++]}"
+done
+}
+
+tmuxake-create-session()
+{
+mirror=$(tmuxake-session-name)
+
+if ! tmux has-session -t "$mirror" 2> /dev/null ; then tmux new-session -s "$mirror" -n tmuxake -d ; fi
+}
+
+tmuxake-not-on-tmuxake-session()
+{
+if [[ "$(tmux display-message -p "#S")" == "$(tmuxake-session-name)" ]]  ; then
+	tmux display-message "You are on the 'tmuxake' session, you can't mirror from here."
+	exit 0
+fi
+}
+
+tmuxake-is-side-pane-visible()
+{
+read pane_mirror_name where <<< $*
+
+parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
+	pane_pid side_pane_pid layout date
+	
+if side_pane_id=$(tmux list-panes $where -F '#{pane_pid}-#{pane_id}' | grep "^${side_pane_pid}-") ; then
+	parse_it '(.*)-(.*)' "$side_pane_id" side_pane_pid side_pane_id
+
+	echo "$side_pane_id"
+else
+	false
+fi
+}
+
+tmuxake-is-source-pane-visible()
+{
+read pane_mirror_name where <<< $*
+
+parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
+	pane_pid side_pane_pid layout date
+	
+if source_pane_id=$(tmux list-panes $where -F '#{pane_pid}-#{pane_id}' | grep "^${pane_pid}-") ; then
+	parse_it '(.*)-(.*)' "$source_pane_id" source_pane_pid source_pane_id
+
+	echo "$source_pane_id"
+else
+	false
+fi
+}
+
+tmuxake-remember-geometry()
+{
+read pane_mirror_name width height <<< $*
+
+parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+	pane_pid side_pane_pid position size date
+
+if [[ $position == 'l' ]] || [[ $position == 'r' ]] ; then
+	new_name="$pane_pid-$side_pane_pid@$position$width@$date"
+fi
+
+if [[ $position == "t" ]] || [[ $position == "b" ]] ; then
+	new_name="$pane_pid-$side_pane_pid@$position$height@$date"
+fi
+
+tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
+}
+
+function tmuxake-has-side-pane()
+{
+pane_pid="$1"
+
+if pane_mirror_name=$(tmux list-windows -t $(tmuxake-session-name) -F '#{window_name}' | grep "^${pane_pid}-") ; then
+	echo "$pane_mirror_name"
+else
+	false	
+fi
+}
+
+function tmuxake-is-side-pane()
+{
+pane_pid="$1"
+
+if pane_mirror_name=$(tmux list-windows -t $(tmuxake-session-name) -F '#{window_name}' | grep -- "-${pane_pid}") ; then
+	echo "$pane_mirror_name"
+else
+	false
+fi
+}
+
+function tmuxake-new-position()
+{
+read pane_pid pane_id side_pane_pid side_pane_id old_position size date new_position <<< $*
+
+# if l <-> r or t <-> b, use current size, otherwise default 
+
+if [[ $new_position == 'l' ]] || [[ $new_position == 'r' ]] ; then
+	if [[ $old_position == 'l' ]] || [[ $old_position == 'r' ]] ; then
+		new_name="$pane_pid-$side_pane_pid@$new_position$size@$date"
+
+		tmux swap-pane -s .$pane_id -t .$side_pane_id -d
+		tmux resize-pane -t $side_pane_id -x $size
+	else
+		[[ $new_position == "l" ]] && shape=$l_shape
+		[[ $new_position == "r" ]] && shape=$r_shape
+
+		third_pane_id=$(tmux split-window -t $pane_id $shape -d -P -F '#{pane_id}')
+
+		tmux swap-pane -s "$side_pane_id" -t "$third_pane_id" -d
+		tmux kill-pane -t $third_pane_id
+
+		width=$(tmux display -p -t $side_pane_id '#{pane_width}')
+		new_name="$pane_pid-$side_pane_pid@${new_position}$width@$date"
+	fi
+fi
+
+if [[ $new_position == "t" ]] || [[ $new_position == "b" ]] ; then
+	if [[ $old_position == 't' ]] || [[ $old_position == 'b' ]] ; then
+		tmux swap-pane -s .$pane_id -t .$side_pane_id -d
+		tmux resize-pane -t $side_pane_id -x $size
+
+		new_name="$pane_pid-$side_pane_pid@$new_position$size@$date"
+	else
+		[[ $new_position == "t" ]] && shape=$t_shape
+		[[ $new_position == "b" ]] && shape=$b_shape
+
+		third_pane_id=$(tmux split-window -t $pane_id -d $shape -P -F '#{pane_id}')
+
+		tmux swap-pane -s "$side_pane_id" -t "$third_pane_id" -d
+		tmux kill-pane -t $third_pane_id
+
+		height=$(tmux display -p -t $side_pane_id '#{pane_height}')
+		new_name="$pane_pid-$side_pane_pid@${new_position}$height@$date"
+	fi
+fi
+
+echo $new_name
+}
+
+tmuxake-change-position()
+{
+new_position="$1"
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+pane_id=$(tmux display-message -p '#{pane_id}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
+   side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+   
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid old_position size date
+
+	if [[ "$new_position" != "$old_position" ]] ; then
+
+		new_name=$(tmuxake-new-position $pane_pid $pane_id $side_pane_pid \
+				$side_pane_id $old_position $size $date $new_position)
+
+		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
+	fi
+fi
+
+if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) && \
+   source_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name) ; then
+
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid old_position size date
+
+	if [[ "$new_position" != "$old_position" ]] ; then
+
+		new_name=$(tmuxake-new-position $pane_pid $source_pane_id $side_pane_pid \
+				$pane_id $old_position $size $date $new_position)
+
+		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
+	fi
+fi
+}
+
+tmuxake-toggle()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+
+	if side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+		tmuxake-hide
+	else
+		tmuxake-show
+	fi
+else
+	if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+		tmuxake-hide
+	else
+		tmuxake-create "$r_shape"
+	fi
+fi
+}
+
+tmuxake-show()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+
+	if side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+		t="visible"
+	else
+		if n=$(tmuxake-is-side-pane-visible $pane_mirror_name "-t $mirror:$pane_mirror_name") ; then
+			t="in tmuxake session"
+
+			parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+				pane_pid side_pane_pid position size date
+
+			if [[ $size -eq 0 ]] ; then
+				size=''
+			else
+				size="-l $size"
+			fi
+			
+			if [[ $position == "r" ]] ; then
+				tmux join-pane $r_shape $size -s "$mirror:$pane_mirror_name"
+				select_pane="-L"
+			fi
+
+			if [[ $position == "l" ]] ; then
+				tmux join-pane $l_shape $size -s "$mirror:$pane_mirror_name"
+				select_pane="-R"
+			fi
+
+			if [[ $position == "b" ]] ; then
+				tmux join-pane $b_shape $size -s "$mirror:$pane_mirror_name"
+				select_pane="-U"
+			fi
+
+			if [[ $position == "t" ]] ; then
+				tmux join-pane $t_shape $size -s "$mirror:$pane_mirror_name"
+				select_pane="-D"
+			fi
+
+			side_pane_id=$(tmux display-message -p '#{pane_id}')
+
+			tmux new-window -n "$pane_mirror_name" -t "$mirror"
+
+			width=$(tmux display -p -t $side_pane_id '#{pane_width}')
+			height=$(tmux display -p -t $side_pane_id '#{pane_height}')
+			tmuxake-remember-geometry "$pane_mirror_name" $width $height
+
+			tmux select-pane "$select_pane"
+		else
+			t="can't find side pane pid"
+			tmux kill-window -t "$mirror:$pane_mirror_name"
+		fi
+	fi
+else
+	if tmuxake-is-side-pane $pane_pid ; then
+		t="in a side pane"
+	else
+		t="no side pane"
+		tmuxake-create "$r_shape"
+	fi
+fi
+
+#echo "show: $t"
+}
+
+tmuxake-hide()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+pane_id=$(tmux display-message -p '#{pane_id}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+
+	if side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+
+		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+			pane_pid side_pane_pid position size date
+
+		width=$(tmux display -p -t $side_pane_id '#{pane_width}')
+		height=$(tmux display -p -t $side_pane_id '#{pane_height}')
+
+		tmux move-pane -s $side_pane_id -t "$mirror:$pane_mirror_name"
+		tmux kill-pane -t "$mirror:$pane_mirror_name.0"
+
+		tmuxake-remember-geometry "$pane_mirror_name" $width $height
+
+		[[ $position == 't' ]] && tmux resize-pane -t $pane_id -U $(( height + 1 ))
+	fi
+else
+	if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+
+		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+			pane_pid side_pane_pid position size date
+
+		width=$(tmux display -p '#{pane_width}')
+		height=$(tmux display -p '#{pane_height}')
+
+		tmux move-pane -s $pane_id -t "$mirror:$pane_mirror_name"
+		# now on the other session!
+
+		tmux kill-pane -t "$mirror:$pane_mirror_name.0"
+
+		tmuxake-remember-geometry "$pane_mirror_name" $width $height
+
+		[[ $position == 't' ]] && tmux resize-pane -t $pane_id -U $(( height + 1 ))
+	fi
+fi
+}
+
+tmuxake-create()
+{
+shape="$1"
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+ 
+cwd=$(tmux display-message -p '#{pane_current_path}')
+mirror=$(tmuxake-session-name)
+
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) \
+   side_pane_info=$(tmuxake-is-side-pane $pane_pid) ; then
+	t="side pane exists"
+else
+	side_pane_info=$(tmux split-window $r_shape -c "$cwd" -P -F '#{pane_pid}-#{pane_id}-#{pane_width}')
+
+	parse_it '([[:digit:]]+)-(%[[:digit:]]+)-([[:digit:]]+)' "$side_pane_info" \
+		side_pane_pid side_pane_id width
+
+	eval $(tmux show-environment TMUXAKE_SOURCE)
+
+	if [[ -n $TMUXAKE_SOURCE ]] ; then 
+		tmux send-keys -t $side_pane_id \ s o u r c e \  $TMUXAKE_SOURCE enter
+	fi
+
+	tmux new-window -n "$pane_pid-$side_pane_pid@r$width@$(date +%m-%d:%H:%M)" -t "$mirror"
+fi
+
+tmux refresh-client -S
+}
+
+tmuxake-close()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
+   pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+	tmuxake-hide
+	tmux kill-window -t "$(tmuxake-session-name):$pane_mirror_name"
+fi
+
+tmux refresh-client -S
+}
+
+tmuxake-check()
+{
+mirror=$(tmuxake-session-name)
+
+if tmux has-session -t "$mirror" 2> /dev/null ; then
+
+	for name in $(tmux list-windows -t "$mirror" -F '#{window_name}') ; do
+		if [[ ! $name == 'tmuxake' ]] ; then
+			parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$name" \
+				pane_pid side_pane_pid layout date
+			
+			printf "$name"
+
+			! kill -0 $pane_pid > /dev/null 2>&1 && \
+				printf " ${red}*missing root-pane process '$pane_pid'"
+
+			! kill -0 $side_pane_pid > /dev/null 2>&1 && \
+				printf " ${yellow}*missing side-pane process '$side_pane_pid'"
+
+			printf "\n"
+		fi	
+	done
+fi
+}
+
+tmuxake-kill()
+{
+mirror=$(tmuxake-session-name)
+to_kill=$1
+
+if [[ -z $to_kill ]] ; then return 1 ; fi
+
+if tmux has-session -t "$mirror" 2> /dev/null ; then
+	for p in $(tmux list-windows -t "$mirror" -F '#{window_name}') ; do
+		if found=$(echo "$p" | grep "${to_kill}-") ; then
+			tmux kill-window -t "$mirror:$p"
+			return 0
+		fi	
+	done
+fi
+
+return 1
+}
+
+tmuxake-status()
+{
+status=""
+
+if tmux has-session -t $(tmuxake-session-name) 2> /dev/null ; then
+	pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+	if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
+			pane_pid side_pane_pid layout date
+
+		if ! kill -0 $side_pane_pid > /dev/null 2>&1; then
+			status="!$(tmuxake-is-source)"
+		else
+			status=$(tmuxake-is-source)
+		fi
+	elif pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
+			pane_pid side_pane_pid layout date
+
+		if ! kill -0 $pane_pid > /dev/null 2>&1; then
+			status="!$(tmuxake-is-mirror)"
+		else
+			status=$(tmuxake-is-mirror)
+		fi
+	fi
+fi
+
+echo "$status"
+}
+
+tmuxake-status-two()
+{
+mirror=$(tmuxake-session-name)
+
+side_panes=$(tmux display -p -t "$mirror" '#{session_windows}')
+((side_panes -= 1))
+
+if [[ $side_panes -le 0 ]] ; then
+	echo $(tmuxake-status)
+else
+	echo "$(tmuxake-status)$side_panes "
+fi
+
+}
+
+tmuxake-quick-start()
+{
+echo "Adding bindings for tmuxake."
+
+tmux bind Tab run "$(pwd)/tmuxake toggle"
+tmux bind BSpace run "$(pwd)/tmuxake close" 
+
+echo "Creating 'tmuxake_mini_prompt' file"
+
+printf "unset PROMPT_COMMAND\nexport PS1='> '\nclear\necho 'You are in a side-pane, a normal shell session' " > tmuxake_mini_prompt
+
+echo "Setting TMUXAKE_SOURCE"
+
+tmux set-env TMUXAKE_SOURCE "$(pwd)/tmuxake_mini_prompt"
+
+cat << 'EOQ'
+
+	type 'prefix + tab', you should have a side-pane with a mini prompt
+
+	type 'prefix + tab', as many times as you want to toggle the side-pane
+
+	type 'prefix + backspace', the side-pane is closed. Everything in it
+	                           is lost!            
+
+EOQ
+
+}
+
+tmuxake-bash-completion()
+{
+cat << 'EOB'
+function _tmuxake_completion
+{
+completion_list="toggle close position check kill status status2"
+
+local cur prev
+COMPREPLY=()
+cur="${COMP_WORDS[COMP_CWORD]}"
+COMPREPLY=( $(compgen -W "${completion_list}" -- ${cur}) )
+
+return 0
+}
+
+complete -o nospace -F _tmuxake_completion tmuxake
+
+EOB
+}
+
+tmuxake-help()
+{
+cat << 'EOH'
+NAME
+	tmuxake - a side-pane manager for tmux
+
+SYNOPSIS
+	tmuake is used through tmux key bingins (See BINDINGS)
+
+	tmuxake also accepts some command (See COMMANDS)
+
+	For the impatient, See QUICK-START
+
+DESCRIPTION
+	tmuxake is a plugin for tmux; binds and manages side-pane for tmux pane.
+
+	Throught key bindings, you can create, display, hide, position, resize,
+	and close the side-pane
+
+	tmuxake integrates in your environements by giving you a status you
+	can integrate in your bash prompt or your tmux status bar.
+
+	tmuxake aims to be for tmux what yakuake is for your graphical console.
+
+	I very often need an extra console to do temporary work. tmux has
+	bindings to create extra panes. For more complexe work, multiple
+	sessions can be used. tmuxake is another way to organize a workspace.
+
+	As tmux, tmuxake creates panes (called side-panes), a side-pane is 
+	bound to a pane (called root-pane), via a call to a command or, more
+	practically, via bound keys.
+
+	A root-pane can only have one side-pane. After its creation, the side-
+	pane can be hidden, or closed, with the press of a key. The side-panes
+	are there when you need them and out of the way the rest of the time.
+
+	Side-panes are created on the right side by default, their position can
+	be changed. You can resize a pane and tmuxake will remember their size
+	when you hide them.
+	
+	side-panes are normal panes so you can run commands in them. When you
+	create a side-pane, the focus is set in the side-pane ; if you hide 
+	and show a side-pane, the focus will stay in the root-pane, it matches
+	closely how side-panes are used, as helpers, to run a short command, to
+	keep an eye on a precess, to display a help file, and other common jobs
+	that are often related to another process but that you would prefer to 
+	not take a static space in your console.
+
+HUMAN ERRORS
+	It takes an hour or two to get used to having side-panes. You will 
+	probably close a side-pane or root-pane with tmux commands instead for
+	using tmuxake commands (their bindings). The side-panes are 'hidden' in 
+	the 'tmuxake' session so you can recover from such mistakes.
+
+	If you closed the side-pane with a tmux command, you can "kill" the 
+	associated information by "closing" the defunct side-pane.
+  
+BINDINGS
+
+	# minimum bindings
+	# you will need to change the path to your path
+
+	bind Tab run "/home/nadim/nadim/bin/tmuxake toggle"
+	bind BSpace run "/home/nadim/nadim/bin/tmuxake close" 
+
+	# extra bindins for positioning, if you are happy having a right pane
+	# only or if you can manage position via commands, these are not needed
+
+	bind C-t run "/home/nadim/nadim/bin/tmuxake position t" 
+	bind C-b run "/home/nadim/nadim/bin/tmuxake position b" 
+	bind C-l run "/home/nadim/nadim/bin/tmuxake position l" 
+	bind C-r run "/home/nadim/nadim/bin/tmuxake position r" 
+
+COMMANDS
+	
+	toggle      Toggle between hidden and visible, creates the side-pane
+	            if it doesn't exist. Default is on the right, 30% in size.
+	            This is binded by defaut to prefix + Tab
+
+	close       Closes the side-pane, the command can be run in root-pane
+	            or side-pane. It is binded by defaut to prefix + Backspace.
+	            The side-pane is closed and destroyed, there is no getting
+	            it or its contents back. 
+
+	position    Given any of 't', 'b', 'l', or 'r', it will move the side-
+	            pane to the top, bottom, left, or right of the root-pane. 
+
+	check       List all the side-panes. It Will check that both root-pane
+	            and side-pane exist. 
+	            
+	            each line is a sub-pane looking like:
+	              3004-12431@r71@10-21:01:21
+	              16555-16460@r47@10-21:02:02 *missing side-pane process '16460'
+
+	            Composed of source-pane pid, side-pane pid, geometry, and
+	            date-time of the side-pane creation. Eventual errors are
+	            appended.
+
+	kill        Given a root-pane pid, kills the side-pane and associated
+	            information.
+
+	status      returns a glyph that can be added to your bash prompt
+	status2     returns glyphs that can be added to your tmux status bar.
+
+	quick-start setup a temporary environment to try tmuxake.
+
+INTEGRATION
+	Bash prompt
+		Add the result of $(/path.../tmuxake status) to your PS1.
+		
+		' ÷'  if the pane is a root-pane, color it cyan to make it pop.
+		' !÷' for a root-pane with a missing side-pane.
+
+		' §'  if the pane is a side-pane.
+		' !§' for a side-pane with a missing root-pane.
+
+	Bash command completion
+		Run 'tmuxake bash-completion', put the output in your .bashrc
+
+	tmux status bar
+		Add the following to your status bar definition in .tmux.conf: 
+
+		set -g status-left ... #[fg=cyan]#(/path.../tmuxake status2)
+
+		It will put the tmuxake status for the current pane + number
+		of side-panes
+
+		' § 4' would mean that the current pane is a side-pane and 
+		there are four side-panes in the 'tmuxake' session.
+ 
+	Smaller prompt
+		I recommand that you create a small prompt for the side-panes
+		as long propmpts tend to clutter their display.
+
+		if the _tmux_ variable 'TMUXAKE_SOURCE' is set, tmuxake will
+		source the file it points to. The file is sourced so you can
+		influence the new environment.
+
+		set the tmux variable, in your .bashrc for example, like this:
+
+		tmux set-env TMUXAKE_SOURCE  '/path .../bash_script_to_source' 
+
+INSTALLATION
+	Copy 'tmuxake' in a directory of your chosing
+
+	Edit your ~/.tmux.conf to add the bindings
+		See 'BINDINGS' above
+
+	Integrate tmuxake in your environment
+		See 'INTEGRATION' above
+			
+	
+ENVIRONMENT
+	tmuxake creates a session, in tmux, named 'tmuxake'
+
+	/.tmux.conf 
+		tmux configuration files where bindings are defined.
+
+BUGS
+	Report on github or via mail, patches are welcome.
+
+AUTHOR
+	Nadim Khemir <nadim dot khemir at gmail dot com>
+
+LICENSE
+	Artistic license 2.0
+
+GITHUB
+	https://github.com/nkh/tmuxake
+
+SEE ALSO
+	tmux - terminal multiplexer
+		https://github.com/tmux/tmux
+
+	Yakuake
+		https://yakuake.kde.org/
+
+	tmux-sessionist
+		https://github.com/tmux-plugins/tmux-sessionist
+
+	tmux-sidebar
+		https://github.com/tmux-plugins/tmux-sidebar
+
+QUICK-START
+	
+	run "tmuxake quick-start"
+
+	type 'prefix + tab', you now have a side-pane
+
+	type 'prefix + tab', as many times as you want to toggle the side-pane
+
+	type 'prefix + backspace', the side-pane is closed. Everything in it
+	                           is lost!            
+
+	Read the manual and proceed with the normal installation.
+EOH
+
+}
+
+
+# run as command
+
+run_as_command()
+{
+[[ "toggle"  == "$1" ]] && tmuxake-toggle
+[[ "close"  == "$1" ]] && tmuxake-close
+
+[[ "position"  == "$1" ]] && tmuxake-change-position $2
+
+[[ "check"  == "$1" ]] && tmuxake-check
+[[ "kill"  == "$1" ]] && tmuxake-kill $2
+
+[[ "status"  == "$1" ]] && tmuxake-status
+[[ "status2"  == "$1" ]] && tmuxake-status-two
+
+[[ 'quick-start' == $1 ]] && tmuxake-quick-start
+[[ 'bash-completion' == $1 ]] && tmuxake-bash-completion
+[[ '--help' == $1 ||  '-h' == $1 ]] && tmuxake-help
+}
+
+run_as_command $@
+
+# keep bash clean
+
+unset -f tmuxake-bash-completion
+unset -f tmuxake-change-position
+unset -f tmuxake-check
+unset -f tmuxake-close
+unset -f tmuxake-create
+unset -f tmuxake-create-session
+unset -f tmuxake-has-side-pane
+unset -f tmuxake-help
+unset -f tmuxake-hide
+unset -f tmuxake-is-mirror
+unset -f tmuxake-is-side-pane
+unset -f tmuxake-is-side-pane-visible
+unset -f tmuxake-is-source
+unset -f tmuxake-is-source-pane-visible
+unset -f tmuxake-is-visible
+unset -f tmuxake-kill
+unset -f tmuxake-new-position
+unset -f tmuxake-not-on-tmuxake-session
+unset -f tmuxake-remember-geometry
+unset -f tmuxake-session-name
+unset -f tmuxake-show
+unset -f tmuxake-status
+unset -f tmuxake-status-two
+unset -f tmuxake-toggle
+unset -f tmuxake-quick-start
+
