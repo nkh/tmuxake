@@ -12,6 +12,7 @@ r_shape="-h -p 60"
 l_shape="$r_shape -b"
 b_shape="-v -p 30"
 t_shape="$b_shape -b"
+default_shape="$r_shape"
 
 warn() { echo "$*" >&2; }
 
@@ -94,7 +95,7 @@ fi
 tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
 }
 
-function tmuxake-has-side-pane()
+tmuxake-has-side-pane()
 {
 pane_pid="$1"
 
@@ -105,7 +106,7 @@ else
 fi
 }
 
-function tmuxake-is-side-pane()
+tmuxake-is-side-pane()
 {
 pane_pid="$1"
 
@@ -116,7 +117,7 @@ else
 fi
 }
 
-function tmuxake-new-position()
+tmuxake-new-position()
 {
 read pane_pid pane_id side_pane_pid side_pane_id old_position size date new_position <<< $*
 
@@ -212,6 +213,28 @@ tmuxake-toggle()
 tmuxake-not-on-tmuxake-session
 tmuxake-create-session
 
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
+   pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid position size date
+
+	if [[ $position != 'f' ]] ; then
+		tmuxake-toggle-side-pane
+	else
+		tmuxake-toggle-full
+	fi
+else
+	tmuxake-create
+fi
+}
+
+tmuxake-toggle-side-pane()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
 mirror=$(tmuxake-session-name)
 pane_pid=$(tmux display-message -p '#{pane_pid}')
 
@@ -226,7 +249,118 @@ else
 	if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
 		tmuxake-hide
 	else
-		tmuxake-create "$r_shape"
+		tmuxake-create
+	fi
+fi
+}
+
+tmuxake-toggle-full()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+cwd=$(tmux display-message -p '#{pane_current_path}')
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid position size date
+
+	if side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+		tmuxake-hide
+	fi
+
+	new_pane_mirror_name="${pane_pid}-$side_pane_pid@f0@$date"
+	tmux rename-window -t "$mirror:$pane_mirror_name" "$new_pane_mirror_name"
+
+	tmux swap-pane -t "$mirror:$new_pane_mirror_name"
+
+elif pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid position size date
+
+	if [[ $position != 'f' ]] ; then
+		tmuxake-hide
+	fi
+
+	new_pane_mirror_name="${pane_pid}-$side_pane_pid@f0@$date"
+	tmux rename-window -t "$mirror:$pane_mirror_name" "$new_pane_mirror_name"
+		
+	tmux swap-pane -t "$mirror:$new_pane_mirror_name"
+else
+	# create
+	side_pane_info=$(tmux new-window -c "$cwd" -n $pane_pid -t "$mirror" -P -F '#{pane_pid}-#{pane_id}')
+
+	parse_it '([[:digit:]]+)-(%[[:digit:]]+)' "$side_pane_info" \
+		side_pane_pid side_pane_id 
+
+	date=`date +%m-%d:%H:%M`
+	pane_mirror_name="${pane_pid}-$side_pane_pid@f0@$date"
+
+	tmux rename-window -t "$mirror:$pane_pid" $pane_mirror_name
+
+	eval $(tmux show-environment TMUXAKE_SOURCE)
+
+	if [[ -n $TMUXAKE_SOURCE ]] ; then 
+		tmux send-keys -t "$mirror:$pane_id" \ s o u r c e \  $TMUXAKE_SOURCE enter
+	fi
+
+	tmux swap-pane -t "$mirror:$pane_mirror_name"
+fi
+}
+
+tmuxake-close()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
+   pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		pane_pid side_pane_pid position size date
+
+	if [[ $position != 'f' ]] ; then
+		tmuxake-close-side-pane
+	else
+		tmuxake-close-full
+	fi
+
+	tmux refresh-client -S
+fi
+}
+
+tmuxake-close-side-pane()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
+   pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+	tmuxake-hide
+	tmux kill-window -t "$(tmuxake-session-name):$pane_mirror_name"
+fi
+}
+
+tmuxake-close-full()
+{
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then 
+	tmux kill-pane -t "$mirror:$pane_mirror_name"
+else
+	if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then 
+		#tmuxake-toggle-full
+		tmux swap-pane -t "$mirror:$pane_mirror_name"
+		tmux kill-pane -t "$mirror:$pane_mirror_name"
 	fi
 fi
 }
@@ -298,8 +432,6 @@ else
 		tmuxake-create "$r_shape"
 	fi
 fi
-
-#echo "show: $t"
 }
 
 tmuxake-hide()
@@ -351,8 +483,6 @@ fi
 
 tmuxake-create()
 {
-shape="$1"
-
 tmuxake-not-on-tmuxake-session
 tmuxake-create-session
  
@@ -361,11 +491,11 @@ mirror=$(tmuxake-session-name)
 
 pane_pid=$(tmux display-message -p '#{pane_pid}')
 
-if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) \
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
    side_pane_info=$(tmuxake-is-side-pane $pane_pid) ; then
 	t="side pane exists"
 else
-	side_pane_info=$(tmux split-window $r_shape -c "$cwd" -P -F '#{pane_pid}-#{pane_id}-#{pane_width}')
+	side_pane_info=$(tmux split-window $default_shape -c "$cwd" -P -F '#{pane_pid}-#{pane_id}-#{pane_width}')
 
 	parse_it '([[:digit:]]+)-(%[[:digit:]]+)-([[:digit:]]+)' "$side_pane_info" \
 		side_pane_pid side_pane_id width
@@ -382,21 +512,6 @@ fi
 tmux refresh-client -S
 }
 
-tmuxake-close()
-{
-tmuxake-not-on-tmuxake-session
-tmuxake-create-session
-
-pane_pid=$(tmux display-message -p '#{pane_pid}')
-
-if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
-   pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
-	tmuxake-hide
-	tmux kill-window -t "$(tmuxake-session-name):$pane_mirror_name"
-fi
-
-tmux refresh-client -S
-}
 
 tmuxake-check()
 {
@@ -521,7 +636,7 @@ tmuxake-bash-completion()
 cat << 'EOB'
 function _tmuxake_completion
 {
-completion_list="toggle close position check kill status status2"
+completion_list="toggle full close close-full position check kill status status2"
 
 local cur prev
 COMPREPLY=()
@@ -743,6 +858,8 @@ run_as_command()
 [[ "toggle"  == "$1" ]] && tmuxake-toggle
 [[ "close"  == "$1" ]] && tmuxake-close
 
+[[ "toggle-full"  == "$1" ]] && tmuxake-toggle-full
+
 [[ "position"  == "$1" ]] && tmuxake-change-position $2
 
 [[ "check"  == "$1" ]] && tmuxake-check
@@ -758,31 +875,7 @@ run_as_command()
 
 run_as_command $@
 
-# keep bash clean
-
-unset -f tmuxake-bash-completion
-unset -f tmuxake-change-position
-unset -f tmuxake-check
-unset -f tmuxake-close
-unset -f tmuxake-create
-unset -f tmuxake-create-session
-unset -f tmuxake-has-side-pane
-unset -f tmuxake-help
-unset -f tmuxake-hide
-unset -f tmuxake-is-mirror
-unset -f tmuxake-is-side-pane
-unset -f tmuxake-is-side-pane-visible
-unset -f tmuxake-is-source
-unset -f tmuxake-is-source-pane-visible
-unset -f tmuxake-is-visible
-unset -f tmuxake-kill
-unset -f tmuxake-new-position
-unset -f tmuxake-not-on-tmuxake-session
-unset -f tmuxake-remember-geometry
-unset -f tmuxake-session-name
-unset -f tmuxake-show
-unset -f tmuxake-status
-unset -f tmuxake-status-two
-unset -f tmuxake-toggle
-unset -f tmuxake-quick-start
-
+# remove our functions from the sell bash
+while read x; do unset -f  $x; done << EOF
+	$(declare -F | grep tmuxake- | sed 's/declare -f//')
+EOF
