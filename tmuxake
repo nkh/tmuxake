@@ -99,7 +99,7 @@ tmuxake-get-mirror-name()
 {
 pane_pid="$1"
 
-if pane_mirror_name=$(tmux list-windows -t $(tmuxake-session-name) -F '#{window_name}' | grep -E "(^${pane_pid}-)|(-${panepid})") ; then
+if pane_mirror_name=$(tmux list-windows -t $(tmuxake-session-name) -F '#{window_name}' | grep -E "(^${pane_pid}-)|(-${pane_pid})") ; then
 	echo "$pane_mirror_name"
 else
 	false	
@@ -172,7 +172,6 @@ if [[ $new_position == "t" ]] || [[ $new_position == "b" ]] ; then
 
 		height=$(tmux display -p -t $side_pane_id '#{pane_height}')
 		new_name="$pane_pid-$side_pane_pid@${new_position}$height@$date"
-		#TODO
 	fi
 fi
 
@@ -349,6 +348,8 @@ if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) || \
 else
 	tmuxake-create
 fi
+	
+tmux refresh-client -S
 }
 
 tmuxake-toggle-side-pane()
@@ -678,6 +679,79 @@ fi
 return 1
 }
 
+tmuxake-detach()
+{
+name="$1"
+
+if [[ -z "$name" ]] ; then
+	echo "Usage: tmuxake detach name"
+	return 1
+fi
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+pane_id=$(tmux display-message -p '#{pane_id}')
+
+#TODO check  duplicate names
+
+if ( pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
+     side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ) \
+   || pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then 
+
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		mirror_root_pane_pid mirror_side_pane_pid position size date
+
+	tmuxake-toggle
+
+	new_name="$name-$mirror_side_pane_pid@$position$size@$date"
+	tmux rename-window -t "$mirror:$detached_name" "$new_name"
+fi
+
+if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		mirror_root_pane_pid mirror_side_pane_pid position size date
+
+	new_name="$name-$mirror_side_pane_pid@$position$size@$date"
+	tmux rename-window -t "$mirror:$detached_name" "$new_name"
+fi
+
+tmux refresh-client -S
+}
+
+tmuxake-attach()
+{
+name="$1"
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+
+if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
+	echo "You already have a side-pane attached; close or detach it first."
+else
+	if [[ -z "$name" ]] ; then
+		echo "Usage: tmuxake attach name"
+		return 1
+	fi
+
+	if detached_name=$(tmux list-windows -t "$mirror" -F '#{window_name}' | grep "^${name}-") ; then
+
+		parse_it '(.+)-([[:digit:]]+)@(.)(.*)@(.*)' "$detached_name" \
+			name mirror_side_pane_pid position size date
+
+		new_name="${pane_pid}-$mirror_side_pane_pid@$position$size@$date"
+		tmux rename-window -t "$mirror:$detached_name" "$new_name"
+		tmuxake-toggle
+	fi
+fi
+}
+
 tmuxake-status()
 {
 status=""
@@ -757,7 +831,7 @@ tmuxake-bash-completion()
 cat << 'EOB'
 function _tmuxake_completion
 {
-completion_list="toggle full close position check kill status status2"
+completion_list="toggle full attach detach close position check kill status status2"
 
 local cur prev
 COMPREPLY=()
@@ -998,6 +1072,9 @@ run_as_command()
 
 [[ "check"  == "$1" ]] && tmuxake-check
 [[ "kill"  == "$1" ]] && tmuxake-kill $2
+
+[[ "detach"  == "$1" ]] && tmuxake-detach $2
+[[ "attach"  == "$1" ]] && tmuxake-attach $2
 
 [[ "status"  == "$1" ]] && tmuxake-status
 [[ "status2"  == "$1" ]] && tmuxake-status-two
