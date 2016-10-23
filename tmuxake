@@ -95,6 +95,17 @@ fi
 tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
 }
 
+tmuxake-get-mirror-name()
+{
+pane_pid="$1"
+
+if pane_mirror_name=$(tmux list-windows -t $(tmuxake-session-name) -F '#{window_name}' | grep -E "(^${pane_pid}-)|(-${panepid})") ; then
+	echo "$pane_mirror_name"
+else
+	false	
+fi
+}
+
 tmuxake-has-side-pane()
 {
 pane_pid="$1"
@@ -140,6 +151,7 @@ if [[ $new_position == 'l' ]] || [[ $new_position == 'r' ]] ; then
 
 		width=$(tmux display -p -t $side_pane_id '#{pane_width}')
 		new_name="$pane_pid-$side_pane_pid@${new_position}$width@$date"
+		tmuxake-remember-geometry "$pane_mirror_name" $width $height
 	fi
 fi
 
@@ -160,13 +172,14 @@ if [[ $new_position == "t" ]] || [[ $new_position == "b" ]] ; then
 
 		height=$(tmux display -p -t $side_pane_id '#{pane_height}')
 		new_name="$pane_pid-$side_pane_pid@${new_position}$height@$date"
+		#TODO
 	fi
 fi
 
 echo $new_name
 }
 
-tmuxake-change-position()
+tmuxake-change-position-full()
 {
 new_position="$1"
 
@@ -177,30 +190,140 @@ mirror=$(tmuxake-session-name)
 pane_pid=$(tmux display-message -p '#{pane_pid}')
 pane_id=$(tmux display-message -p '#{pane_id}')
 
-if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
-   side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
-   
+if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
-		pane_pid side_pane_pid old_position size date
+		mirror_root_pane_pid mirror_side_pane_pid old_position size date
 
+	[[ $old_position == 'f' ]]  && [[ $new_position == 'f' ]] && return
+
+	if [[ $new_position == 'f' ]] ; then
+		if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+
+    			root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name)
+
+			tmux swap-pane -s $pane-id -t $root_pane_id
+			tmux move-pane -s $root_pane_id -t "$mirror:$pane_mirror_name"
+			tmux kill-pane -t "$mirror:$pane_mirror_name.0"
+
+			new_name="${mirror_root_pane_pid}-$mirror_side_pane_pid@f0@$date"
+			tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
+		else
+    			root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name)
+
+			tmux move-pane -s $root_pane_id -t "$mirror:$pane_mirror_name"
+			tmux kill-pane -t "$mirror:$pane_mirror_name.0"
+
+			new_name="${mirror_root_pane_pid}-$mirror_side_pane_pid@f0@$date"
+			tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
+		fi
+	else
+		if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
+			echo "side pane <$pane_pid>"
+			if [[ $new_position == "r" ]] ; then
+				tmux join-pane $l_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-R"
+			fi
+
+			if [[ $new_position == "l" ]] ; then
+				tmux join-pane $r_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-L"
+			fi
+
+			if [[ $new_position == "b" ]] ; then
+				tmux join-pane $t_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-D"
+			fi
+
+			if [[ $new_position == "t" ]] ; then
+				tmux join-pane $b_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-U"
+			fi
+
+			side_pane_id=$(tmux display-message -p '#{pane_id}')
+
+			width=$(tmux display -p -t $side_pane_id '#{pane_width}')
+			height=$(tmux display -p -t $side_pane_id '#{pane_height}')
+			new_name="${mirror_root_pane_pid}-$mirror_side_pane_pid@${new_position}0@$date"
+
+			tmux new-window -n "$new_name" -t "$mirror"
+			tmuxake-remember-geometry "$new_name" $width $height
+
+			tmux select-pane "$select_pane"
+		else
+			echo "root pane <$pane_pid>"
+			if [[ $new_position == "r" ]] ; then
+				tmux join-pane $r_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-L"
+			fi
+
+			if [[ $new_position == "l" ]] ; then
+				tmux join-pane $l_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-R"
+			fi
+
+			if [[ $new_position == "b" ]] ; then
+				tmux join-pane $b_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-U"
+			fi
+
+			if [[ $new_position == "t" ]] ; then
+				tmux join-pane $t_shape -s "$mirror:$pane_mirror_name"
+				select_pane="-D"
+			fi
+
+			side_pane_id=$(tmux display-message -p '#{pane_id}')
+
+			width=$(tmux display -p -t $side_pane_id '#{pane_width}')
+			height=$(tmux display -p -t $side_pane_id '#{pane_height}')
+			new_name="${mirror_root_pane_pid}-$mirror_side_pane_pid@${new_position}0@$date"
+
+			tmux new-window -n "$new_name" -t "$mirror"
+			tmuxake-remember-geometry "$new_name" $width $height
+
+			tmux select-pane "$select_pane"
+		fi
+	fi
+fi
+}
+
+tmuxake-change-position()
+{
+new_position="$1"
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_id=$(tmux display-message -p '#{pane_id}')
+
+if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
+		mirror_root_pane_pid mirror_side_pane_pid old_position size date
+else
+	return
+fi
+
+if [[ $new_position == 'f' ]]  || [[ $old_position == 'f' ]] ; then
+
+	tmuxake-change-position-full $new_position
+
+elif pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
+     side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
+   
 	if [[ "$new_position" != "$old_position" ]] ; then
 
-		new_name=$(tmuxake-new-position $pane_pid $pane_id $side_pane_pid \
+		new_name=$(tmuxake-new-position $mirror_root_pane_pid $pane_id $mirror_side_pane_pid \
 				$side_pane_id $old_position $size $date $new_position)
 
 		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
 	fi
-fi
 
-if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) && \
-   source_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name) ; then
-
-	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
-		pane_pid side_pane_pid old_position size date
+elif pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) && \
+     root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name) ; then
 
 	if [[ "$new_position" != "$old_position" ]] ; then
 
-		new_name=$(tmuxake-new-position $pane_pid $source_pane_id $side_pane_pid \
+		new_name=$(tmuxake-new-position $mirror_root_pane_pid $root_pane_id $mirror_side_pane_pid \
 				$pane_id $old_position $size $date $new_position)
 
 		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
@@ -304,7 +427,7 @@ else
 	eval $(tmux show-environment TMUXAKE_SOURCE)
 
 	if [[ -n $TMUXAKE_SOURCE ]] ; then 
-		tmux send-keys -t "$mirror:$pane_id" \ s o u r c e \  $TMUXAKE_SOURCE enter
+		tmux send-keys -t "$mirror:$pane_mirror_name" \ s o u r c e \  $TMUXAKE_SOURCE enter
 	fi
 
 	tmux swap-pane -t "$mirror:$pane_mirror_name"

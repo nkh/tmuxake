@@ -1,6 +1,10 @@
 tmuxake
 -------
 
+don't blindly kill panes
+	send sigterm
+	check if more than bash is running and warn
+
 full-size side-pane, one that takes over the root pane
 
 Attach and detach side-panes, this allows for cross session
