@@ -128,7 +128,7 @@ else
 fi
 }
 
-tmuxake-new-position()
+tmuxake-position-side-pane()
 {
 read pane_pid pane_id side_pane_pid side_pane_id old_position size date new_position <<< $*
 
@@ -179,7 +179,7 @@ fi
 echo $new_name
 }
 
-tmuxake-change-position-full()
+tmuxake-position-full-pane()
 {
 new_position="$1"
 
@@ -218,7 +218,6 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 		fi
 	else
 		if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
-			echo "side pane <$pane_pid>"
 			if [[ $new_position == "r" ]] ; then
 				tmux join-pane $l_shape -s "$mirror:$pane_mirror_name"
 				select_pane="-R"
@@ -250,7 +249,6 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 
 			tmux select-pane "$select_pane"
 		else
-			echo "root pane <$pane_pid>"
 			if [[ $new_position == "r" ]] ; then
 				tmux join-pane $r_shape -s "$mirror:$pane_mirror_name"
 				select_pane="-L"
@@ -305,14 +303,14 @@ fi
 
 if [[ $new_position == 'f' ]]  || [[ $old_position == 'f' ]] ; then
 
-	tmuxake-change-position-full $new_position
+	tmuxake-position-full-pane $new_position
 
 elif pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
      side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ; then
    
 	if [[ "$new_position" != "$old_position" ]] ; then
 
-		new_name=$(tmuxake-new-position $mirror_root_pane_pid $pane_id $mirror_side_pane_pid \
+		new_name=$(tmuxake-position-side-pane $mirror_root_pane_pid $pane_id $mirror_side_pane_pid \
 				$side_pane_id $old_position $size $date $new_position)
 
 		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
@@ -323,7 +321,7 @@ elif pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) && \
 
 	if [[ "$new_position" != "$old_position" ]] ; then
 
-		new_name=$(tmuxake-new-position $mirror_root_pane_pid $root_pane_id $mirror_side_pane_pid \
+		new_name=$(tmuxake-position-side-pane $mirror_root_pane_pid $root_pane_id $mirror_side_pane_pid \
 				$pane_id $old_position $size $date $new_position)
 
 		tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
@@ -759,7 +757,7 @@ tmuxake-bash-completion()
 cat << 'EOB'
 function _tmuxake_completion
 {
-completion_list="toggle full close close-full position check kill status status2"
+completion_list="toggle full close position check kill status status2"
 
 local cur prev
 COMPREPLY=()
@@ -785,28 +783,32 @@ SYNOPSIS
 
 	tmuxake also accepts some command (See COMMANDS)
 
-	For the impatient, See QUICK-START
+	For the impatient, See QUICK-START, for a very temporary setup
 
 DESCRIPTION
-	tmuxake is a plugin for tmux; binds and manages side-pane for tmux pane.
+	tmuxake is a plugin for tmux; it binds and manages side-panes.
 
 	Throught key bindings, you can create, display, hide, position, resize,
 	and close the side-pane
 
 	tmuxake integrates in your environements by giving you a status you
-	can integrate in your bash prompt or your tmux status bar.
+	can display in your bash prompt or your tmux status bar.
 
 	tmuxake aims to be for tmux what yakuake is for your graphical console.
 
-	I very often need an extra console to do temporary work. tmux has
-	bindings to create extra panes. For more complexe work, multiple
+	tmux has bindings to create extra panes. For complexe work, multiple
 	sessions can be used. tmuxake is another way to organize a workspace.
+
+	If you often need an extra console to do temporary work, tmuxake can be
+	useful.
 
 	As tmux, tmuxake creates panes (called side-panes), a side-pane is 
 	bound to a pane (called root-pane), via a call to a command or, more
 	practically, via bound keys.
 
-	A root-pane can only have one side-pane. After its creation, the side-
+	Any tmux pane can have a side-pane
+
+	A tmux pane can only have one side-pane. After its creation, the side-
 	pane can be hidden, or closed, with the press of a key. The side-panes
 	are there when you need them and out of the way the rest of the time.
 
@@ -818,7 +820,7 @@ DESCRIPTION
 	create a side-pane, the focus is set in the side-pane ; if you hide 
 	and show a side-pane, the focus will stay in the root-pane, it matches
 	closely how side-panes are used, as helpers, to run a short command, to
-	keep an eye on a precess, to display a help file, and other common jobs
+	keep an eye on a process, to display a help file, and other common jobs
 	that are often related to another process but that you would prefer to 
 	not take a static space in your console.
 
@@ -826,10 +828,9 @@ HUMAN ERRORS
 	It takes an hour or two to get used to having side-panes. You will 
 	probably close a side-pane or root-pane with tmux commands instead for
 	using tmuxake commands (their bindings). The side-panes are 'hidden' in 
-	the 'tmuxake' session so you can recover from such mistakes.
-
-	If you closed the side-pane with a tmux command, you can "kill" the 
-	associated information by "closing" the defunct side-pane.
+	the 'tmuxake' session so you can recover them if you closed the root-
+	pane. If you closed the side-pane with a tmux command, you can "kill"
+	the associated information by "closing" the defunct side-pane.
   
 BINDINGS
 
@@ -837,6 +838,7 @@ BINDINGS
 	# you will need to change the path to your path
 
 	bind Tab run "/home/nadim/nadim/bin/tmuxake toggle"
+	bind C-a run "/home/nadim/nadim/bin/tmuxake full" 
 	bind BSpace run "/home/nadim/nadim/bin/tmuxake close" 
 
 	# extra bindins for positioning, if you are happy having a right pane
@@ -846,20 +848,29 @@ BINDINGS
 	bind C-b run "/home/nadim/nadim/bin/tmuxake position b" 
 	bind C-l run "/home/nadim/nadim/bin/tmuxake position l" 
 	bind C-r run "/home/nadim/nadim/bin/tmuxake position r" 
+	bind C-f run "/home/nadim/nadim/bin/tmuxake position f" 
 
 COMMANDS
 	
-	toggle      Toggle between hidden and visible, creates the side-pane
-	            if it doesn't exist. Default is on the right, 30% in size.
+	toggle      Toggle between hidden and visible.
+
+	            creates the side-pane if it doesn't exist. Default is on the
+	            right, 60% in size.
+
 	            This is binded by defaut to prefix + Tab
+
+	full        Creates a side-pane that is the same size as the root pane.
+
+	            This is binded by defaut to prefix + C-a 
 
 	close       Closes the side-pane, the command can be run in root-pane
 	            or side-pane. It is binded by defaut to prefix + Backspace.
 	            The side-pane is closed and destroyed, there is no getting
 	            it or its contents back. 
 
-	position    Given any of 't', 'b', 'l', or 'r', it will move the side-
-	            pane to the top, bottom, left, or right of the root-pane. 
+	position    Given any of 't', 'b', 'l', 'r, or 'f', it will move the 
+	            side-pane to the top, bottom, left, right, or mae it full
+	            size. 
 
 	check       List all the side-panes. It Will check that both root-pane
 	            and side-pane exist. 
@@ -981,7 +992,7 @@ run_as_command()
 [[ "toggle"  == "$1" ]] && tmuxake-toggle
 [[ "close"  == "$1" ]] && tmuxake-close
 
-[[ "toggle-full"  == "$1" ]] && tmuxake-toggle-full
+[[ "full"  == "$1" ]] && tmuxake-toggle-full
 
 [[ "position"  == "$1" ]] && tmuxake-change-position $2
 
