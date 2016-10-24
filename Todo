@@ -3,12 +3,12 @@ tmuxake
 
 test positioning of non full side pane via bindings
 
+import to tmuxake
+	export
+
 don't blindly kill panes
 	send sigterm
 	check if more than bash is running and warn
-
-Attach and detach side-panes, this allows for cross session
-	side-panes 
 
 tweek the size of root-panes after side-panes are hidden, it is
 	sometimes difficult to understand how tmux resize panes
