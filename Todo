@@ -1,10 +1,13 @@
 tmuxake
 -------
 
-test positioning of non full side pane via bindings
+tmuxake status 2
+	total side panes
+	panes in  this window
+	orphan panes
+	error panes
 
-import to tmuxake
-	export
+test positioning of non full side pane via bindings
 
 don't blindly kill panes
 	send sigterm

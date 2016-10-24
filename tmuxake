@@ -480,7 +480,6 @@ if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
 	tmux kill-pane -t "$mirror:$pane_mirror_name"
 else
 	if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then 
-		#tmuxake-toggle-full
 		tmux swap-pane -t "$mirror:$pane_mirror_name"
 		tmux kill-pane -t "$mirror:$pane_mirror_name"
 	fi
@@ -643,16 +642,18 @@ if tmux has-session -t "$mirror" 2> /dev/null ; then
 
 	for name in $(tmux list-windows -t "$mirror" -F '#{window_name}') ; do
 		if [[ ! $name == 'tmuxake' ]] ; then
-			parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$name" \
+			parse_it '(.+)-([[:digit:]]+)@(.*)@(.*)' "$name" \
 				pane_pid side_pane_pid layout date
 			
 			printf "$name"
 
-			! kill -0 $pane_pid > /dev/null 2>&1 && \
-				printf " ${red}*missing root-pane process '$pane_pid'"
+			if [[ $pane_pid =~ ^([[:digit:]]+)$ ]] ; then
+				! kill -0 $pane_pid > /dev/null 2>&1 && \
+					printf " ${red}*root-pane process not running '$pane_pid'$reset"
+			fi
 
 			! kill -0 $side_pane_pid > /dev/null 2>&1 && \
-				printf " ${yellow}*missing side-pane process '$side_pane_pid'"
+				printf " ${yellow}*side-pane process not running '$side_pane_pid'$reset"
 
 			printf "\n"
 		fi	
@@ -695,9 +696,16 @@ mirror=$(tmuxake-session-name)
 pane_pid=$(tmux display-message -p '#{pane_pid}')
 pane_id=$(tmux display-message -p '#{pane_id}')
 
+if ! pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
+	echo "You can only 'detach' a side-pane, use 'import' for non side-panes."
+	return 1
+fi
+
 if ( pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
      side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ) \
    || pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then 
+
+	pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid)
 
 	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.)(.*)@(.*)' "$pane_mirror_name" \
 		mirror_root_pane_pid mirror_side_pane_pid position size date
@@ -750,12 +758,16 @@ else
 
 	if detached_name=$(tmux list-windows -t "$mirror" -F '#{window_name}' | grep "^${name}-") ; then
 
-		parse_it '(.+)-([[:digit:]]+)@(.)(.*)@(.*)' "$detached_name" \
-			name mirror_side_pane_pid position size date
+		if ! kill -0 $name > /dev/null 2>&1; then
+			parse_it '(.+)-([[:digit:]]+)@(.)(.*)@(.*)' "$detached_name" \
+				name mirror_side_pane_pid position size date
 
-		new_name="${pane_pid}-$mirror_side_pane_pid@$position$size@$date"
-		tmux rename-window -t "$mirror:$detached_name" "$new_name"
-		tmuxake-toggle
+			new_name="${pane_pid}-$mirror_side_pane_pid@$position$size@$date"
+			tmux rename-window -t "$mirror:$detached_name" "$new_name"
+			tmuxake-toggle
+		else
+			echo "Can't attached to an attached side-pane."
+		fi
 	else
 		echo "No detached side-pane with that name was found."
 	fi
@@ -896,7 +908,7 @@ function _tmuxake_completion
 {
 completion_list="toggle full attach detach import push pop close position check kill status status2"
 
-local cur prev
+cur prev
 COMPREPLY=()
 cur="${COMP_WORDS[COMP_CWORD]}"
 COMPREPLY=( $(compgen -W "${completion_list}" -- ${cur}) )
@@ -923,40 +935,34 @@ SYNOPSIS
 	For the impatient, See QUICK-START, for a very temporary setup
 
 DESCRIPTION
-	tmuxake is a plugin for tmux; it binds and manages side-panes.
-
-	Throught key bindings, you can create, display, hide, position, resize,
-	and close the side-pane
-
-	tmuxake integrates in your environements by giving you a status you
-	can display in your bash prompt or your tmux status bar.
-
-	tmuxake aims to be for tmux what yakuake is for your graphical console.
-
 	tmux has bindings to create extra panes. For complexe work, multiple
 	sessions can be used. tmuxake is another way to organize a workspace.
+
+	tmuxake is a plugin for tmux; it binds and manages "side-panes".
 
 	If you often need an extra console to do temporary work, tmuxake can be
 	useful.
 
-	As tmux, tmuxake creates panes (called side-panes), a side-pane is 
-	bound to a pane (called root-pane), via a call to a command or, more
-	practically, via key binding.
+	As tmux, tmuxake creates panes (side-panes), a side-pane is bound to a
+	pane (root-pane), via a call to a command or, more practically, via key
+	binding.
 
-	Any tmux pane can have a side-pane
+	Any tmux pane can have one side-pane, but a side-pane can not have a
+	side-pane
 
-	A tmux pane can only have one side-pane. After its creation, the side-
-	pane can be hidden, or closed, with the press of a key. The side-panes
-	are there when you need them, and out of the way the rest of the time.
+	After its creation, the side-pane can be hidden, or closed, with the
+	press of a key. The side-panes are there when you need them, and out of
+	the way the rest of the time.
 
 	Side-panes are created on the right side by default, their position can
 	be changed. You can resize a pane and tmuxake will remember their size
-	when you hide them.
+	when you hide (toggle) them.
 	
 	side-panes are normal panes so you can run commands in them. When you
 	create a side-pane, the focus is set in the side-pane ; if you hide 
-	and show a side-pane, the focus will stay in the root-pane, it matches
-	closely how side-panes are used, as helpers, to run a short command, to
+	and show a side-pane, the focus will stay in the root-pane.
+
+	side-panes are used, as helpers, to run a short command, to
 	keep an eye on a process, to display a help file, and other common jobs
 	that are often related to another process but that you would prefer to 
 	not take a static space in your console.
@@ -968,6 +974,11 @@ DESCRIPTION
 	pane. If you closed the side-pane with a tmux command, you can "kill"
 	the associated information by "closing" the defunct side-pane.
   
+	tmuxake integrates in your environements by giving you a status you
+	can display in your bash prompt or your tmux status bar.
+
+	tmuxake aims to be for tmux what yakuake is for your graphical console.
+
 BINDINGS
 
 	# minimum bindings
@@ -1013,8 +1024,10 @@ COMMANDS
 	detach      Breaks the bound between the root-pane and the side-pane.
                     You must provide a name for the detached pane. 
 
-	attach      Attaches a detached side-pane to the current pane. 
-
+	attach      Attaches a named detached side-pane to the current pane. 
+	            It also allows you to attach to orphan side-panes, those
+	            which root-pane-pid is not running
+ 
 	import      Imports the current tmux (not tmuxake) pane as a full-size
 	            pane. You must provide a name.
 	            The pane is now a detached side-pane that can be attached
@@ -1033,11 +1046,11 @@ COMMANDS
 	            
 	            each line is a sub-pane looking like:
 	              3004-12431@r71@10-21:01:21
-	              16555-16460@r47@10-21:02:02 *missing side-pane process '16460'
+	              16555-16460@r47@10-21:02:02 *root-pane process not running '16555'
 
 	            Composed of source-pane pid, side-pane pid, geometry, and
 	            date-time of the side-pane creation. Eventual errors are
-	            appended.
+	            appended, starting with '*'.
 
 	kill        Given a root-pane pid, kills the side-pane and associated
 	            information.
