@@ -5,6 +5,7 @@
 tmuxake-session-name() { echo "tmuxake" ; }
 tmuxake-is-source() { echo "÷ " ; }
 tmuxake-is-mirror() { echo "§ " ; }
+tmuxake-is-detached() { echo "[ " ; }
 
 #set -euo pipefail
 
@@ -13,6 +14,8 @@ l_shape="$r_shape -b"
 b_shape="-v -p 30"
 t_shape="$b_shape -b"
 default_shape="$r_shape"
+
+switch_back_to_root_pane=0
 
 warn() { echo "$*" >&2; }
 
@@ -246,7 +249,7 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 			tmux new-window -n "$new_name" -t "$mirror"
 			tmuxake-remember-geometry "$new_name" $width $height
 
-			tmux select-pane "$select_pane"
+			(( $switch_back_to_root_pane )) && tmux select-pane "$select_pane"
 		else
 			if [[ $new_position == "r" ]] ; then
 				tmux join-pane $r_shape -s "$mirror:$pane_mirror_name"
@@ -277,7 +280,7 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 			tmux new-window -n "$new_name" -t "$mirror"
 			tmuxake-remember-geometry "$new_name" $width $height
 
-			tmux select-pane "$select_pane"
+			(( $switch_back_to_root_pane )) && tmux select-pane "$select_pane"
 		fi
 	fi
 fi
@@ -539,7 +542,7 @@ if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
 			height=$(tmux display -p -t $side_pane_id '#{pane_height}')
 			tmuxake-remember-geometry "$pane_mirror_name" $width $height
 
-			tmux select-pane "$select_pane"
+			(( $switch_back_to_root_pane )) && tmux select-pane "$select_pane"
 		else
 			t="can't find side pane pid"
 			tmux kill-window -t "$mirror:$pane_mirror_name"
@@ -847,7 +850,9 @@ if tmux has-session -t $(tmuxake-session-name) 2> /dev/null ; then
 		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
 			pane_pid side_pane_pid layout date
 
-		if ! kill -0 $pane_pid > /dev/null 2>&1; then
+		if [[ ! $pane_pid =~ [[:digit:]] ]] ; then
+			status="$(tmuxake-is-detached)"
+		elif ! kill -0 $pane_pid > /dev/null 2>&1; then
 			status="!$(tmuxake-is-mirror)"
 		else
 			status=$(tmuxake-is-mirror)
@@ -861,16 +866,44 @@ echo "$status"
 tmuxake-status-two()
 {
 mirror=$(tmuxake-session-name)
+side_panes=0
+orphan_panes=0
+detached_panes=0
 
-side_panes=$(tmux display -p -t "$mirror" '#{session_windows}')
-((side_panes -= 1))
 
-if [[ $side_panes -le 0 ]] ; then
-	echo $(tmuxake-status)
-else
-	echo "$(tmuxake-status)$side_panes "
-fi
+for window_name in $(tmux list-windows -t "$mirror" -F '#{window_name}' | grep -v 'tmuxake') ; do
 
+	unset pane_pid
+
+	parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$window_name" \
+		pane_pid side_pane_pid layout date
+
+	if [[ -z $pane_pid ]]	; then
+		(( detached_panes += 1 ))
+	else
+		is_orphan=0 
+
+		if ! kill -0 $side_pane_pid > /dev/null 2>&1 ; then (( is_orphan += 1 )) ; fi
+		if ! kill -0 $pane_pid > /dev/null 2>&1 ; then (( is_orphan += 1 )) ; fi
+
+		if (( is_orphan == 0 ))	; then
+			(( side_panes += 1 ))
+		elif (( is_orphan == 1 )) ; then
+			(( orphan_panes += 1 ))
+		elif (( is_orphan == 2 )) ; then
+			tmux kill-window -t "$mirror:$window_name"
+		fi
+	fi
+done
+
+if (( side_panes == 0 )) ; then side_panes='' ; fi
+if (( orphan_panes == 0 )) ; then orphan_panes='' ; else orphan_panes="!${orphan_panes}" ; fi
+if (( detached_panes == 0 )) ; then detached_panes='' ; else detached_panes="[${detached_panes}" ; fi
+
+mirror_info="$side_panes$orphan_panes$detached_panes "
+if [[ $mirror_info == ' ' ]] ; then mirror_info='' ; fi
+
+echo "$(tmuxake-status)$mirror_info"
 }
 
 tmuxake-quick-start()
@@ -1064,30 +1097,44 @@ INTEGRATION
 	Bash prompt
 		Add the result of $(/path.../tmuxake status) to your PS1.
 		
-		' ÷'  if the pane is a root-pane, color it cyan to make it pop.
-		' !÷' for a root-pane with a missing side-pane.
+		'÷i '  if the pane is a root-pane, color it cyan to make it pop.
+		'!÷ ' for a root-pane with a missing side-pane.
 
-		' §'  if the pane is a side-pane.
-		' !§' for a side-pane with a missing root-pane.
+		'§ '  if the pane is a side-pane.
+		'!§ ' for a side-pane with a missing root-pane.
+
+		'[ '  if the pane is detached. You can only see those if you
+	        are on the tmuake session.
 
 		Be aware that the bash prompt is displayed after a command is
 		run and that tmuxake commands bound to keys will not update the
 		bash prompt. The tmux status bar is more up to date. 
-
-	Bash command completion
-		Run 'tmuxake bash-completion', put the output in your .bashrc
 
 	tmux status bar
 		Add the following to your status bar definition in .tmux.conf: 
 
 		set -g status-left ... #[fg=cyan]#(/path.../tmuxake status2)
 
-		It will put the tmuxake status for the current pane + number
-		of side-panes
+		It will put the tmuxake status for the current pane + side-panes
+		information.  
 
-		' § 4' would mean that the current pane is a side-pane and 
+		'§ 4 ' would mean that the current pane is a side-pane and 
 		there are four side-panes in the 'tmuxake' session.
  
+		the side-pane information ('4' in the example above) contains
+		up to three fields. The number of side-panes with both root-
+		pane and side-pane running. The number of panes where one of
+		the sides is not running. And the number of detached panes.
+
+		'§ 4!1[2 ' would mean that the current pane is a side-pane, and
+		there are 4 root-side-panes, there is one tmuxake-pane where
+		the root-pane  or the side-pane is missing, there are two 
+		detached panes.
+
+		A side effect of showing the tmuxake status in the status bar 
+		is that tmuxake panes with neither root-pane nor side-pane are
+		deleted.
+
 	Smaller prompt
 		I recommand that you create a small prompt for the side-panes
 		as long propmpts tend to clutter their display.
@@ -1100,6 +1147,9 @@ INTEGRATION
 
 		tmux set-env TMUXAKE_SOURCE  '/path .../bash_script_to_source' 
 
+	Bash command completion
+		Run 'tmuxake bash-completion', put the output in your .bashrc
+
 INSTALLATION
 	Copy 'tmuxake' in a directory of your chosing
 
@@ -1109,7 +1159,6 @@ INSTALLATION
 	Integrate tmuxake in your environment
 		See 'INTEGRATION' above
 			
-	
 ENVIRONMENT
 	tmuxake creates a session, in tmux, named 'tmuxake'
 

@@ -1,11 +1,7 @@
 tmuxake
 -------
 
-tmuxake status 2
-	total side panes
-	panes in  this window
-	orphan panes
-	error panes
+detach side-pane in new window in current session
 
 test positioning of non full side pane via bindings
 
@@ -17,3 +13,4 @@ tweek the size of root-panes after side-panes are hidden, it is
 	sometimes difficult to understand how tmux resize panes
 	when a pane is closed
 
+add TMUXAKE status to tmux-pid
