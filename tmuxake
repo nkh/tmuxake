@@ -1032,9 +1032,7 @@ DESCRIPTION
 	be changed. You can resize a pane and tmuxake will remember their size
 	when you hide (toggle) them.
 	
-	side-panes are normal panes so you can run commands in them. When you
-	create a side-pane, the focus is set in the side-pane ; if you hide 
-	and show a side-pane, the focus will stay in the root-pane.
+	side-panes are normal panes with your shell running in them.
 
 	side-panes are used, as helpers, to run a short command, to
 	keep an eye on a process, to display a help file, and other common jobs

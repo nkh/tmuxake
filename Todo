@@ -1,8 +1,6 @@
 tmuxake
 -------
 
-detach side-pane in new window in current session
-
 test positioning of non full side pane via bindings
 
 don't blindly kill panes
