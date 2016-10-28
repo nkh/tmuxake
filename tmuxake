@@ -64,7 +64,7 @@ else
 fi
 }
 
-tmuxake-is-source-pane-visible()
+tmuxake-is-root-pane-visible()
 {
 read pane_mirror_name where <<< $*
 
@@ -201,7 +201,7 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 	if [[ $new_position == 'f' ]] ; then
 		if pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then
 
-    			root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name)
+    			root_pane_id=$(tmuxake-is-root-pane-visible $pane_mirror_name)
 
 			tmux swap-pane -s $pane-id -t $root_pane_id
 			tmux move-pane -s $root_pane_id -t "$mirror:$pane_mirror_name"
@@ -210,7 +210,7 @@ if pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
 			new_name="${mirror_root_pane_pid}-$mirror_side_pane_pid@f0@$date"
 			tmux rename-window -t "$mirror:$pane_mirror_name" "$new_name"
 		else
-    			root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name)
+    			root_pane_id=$(tmuxake-is-root-pane-visible $pane_mirror_name)
 
 			tmux move-pane -s $root_pane_id -t "$mirror:$pane_mirror_name"
 			tmux kill-pane -t "$mirror:$pane_mirror_name.0"
@@ -319,7 +319,7 @@ elif pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
 	fi
 
 elif pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) && \
-     root_pane_id=$(tmuxake-is-source-pane-visible $pane_mirror_name) ; then
+     root_pane_id=$(tmuxake-is-root-pane-visible $pane_mirror_name) ; then
 
 	if [[ "$new_position" != "$old_position" ]] ; then
 
@@ -741,6 +741,45 @@ fi
 tmux refresh-client -S
 }
 
+tmuxake-break()
+{
+new_pane_name="${1:-bash}"
+
+tmuxake-not-on-tmuxake-session
+tmuxake-create-session
+
+mirror=$(tmuxake-session-name)
+pane_pid=$(tmux display-message -p '#{pane_pid}')
+pane_id=$(tmux display-message -p '#{pane_id}')
+
+if ! pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid) ; then
+	echo "You can only 'break' a side-pane. Check tmux break-pane (prefix + !)"
+
+elif ( pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) && \
+     side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name) ) \
+   || pane_mirror_name=$(tmuxake-is-side-pane $pane_pid) ; then 
+
+	pane_mirror_name=$(tmuxake-get-mirror-name $pane_pid)
+	side_pane_id=$(tmuxake-is-side-pane-visible $pane_mirror_name)
+
+	if root_pane_id=$(tmuxake-is-root-pane-visible $pane_mirror_name) ; then
+		tmux break-pane -s $side_pane_id
+		tmux kill-window -t "$mirror:$pane_mirror_name"
+	else
+		tmux move-window -k -s "$mirror:$pane_mirror_name"  -t "$(tmux display-message -p '#S'):"
+		tmux swap-pane -t $pane_id
+		tmux rename-window "$new_pane_name"
+	fi		
+
+elif pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
+	#side-pane is hidden
+	tmux move-window -k -s "$mirror:$pane_mirror_name"  -t "$(tmux display-message -p '#S'):"
+	tmux rename-window -t "$mirror:$detached_name" "$new_pane_name"
+fi
+
+tmux refresh-client -S
+}
+
 tmuxake-attach()
 {
 name="$1"
@@ -800,8 +839,10 @@ else
 		echo "There is already a detached side-pane with that name."
 		return 1
 	else
+		pane_width=$(tmux display-message -p '#{pane_width}')
+
 		date=`date +%m-%d:%H:%M`
-		new_name="${name}-$pane_pid@f0@$date"
+		new_name="${name}-$pane_pid@r$pane_width@$date"
 
 		tmux new-window -n "$new_name" -t "$mirror"
 		tmux move-pane  -t "$mirror:$new_name"
@@ -939,7 +980,7 @@ tmuxake-bash-completion()
 cat << 'EOB'
 function _tmuxake_completion
 {
-completion_list="toggle full attach detach import push pop close position check kill status status2"
+completion_list="toggle full attach detach break import push pop close position check kill status status2"
 
 cur prev
 COMPREPLY=()
@@ -1059,12 +1100,25 @@ COMMANDS
 
 	attach      Attaches a named detached side-pane to the current pane. 
 	            It also allows you to attach to orphan side-panes, those
-	            which root-pane-pid is not running
+	            which root-pane-pid is not running. 
+
+	break       Breaks the side-pane from tmuxake, you can provide a name
+	            for the new window. This command works like tmux's break-
+	            pane but on tmux side-panes.
  
-	import      Imports the current tmux (not tmuxake) pane as a full-size
-	            pane. You must provide a name.
+	import      Imports the current tmux (not tmuxake) pane. You must
+	            provide a name.
+
 	            The pane is now a detached side-pane that can be attached
-	            with: tmuxake attach name
+	            with: tmuxake attach name. 
+
+	            Attaching imported windows is always done to the right as
+	            we don't have any positioning information about them, they
+	            are normal tmux windows/panes.
+
+	            Importing to tmuxake records the  width of the pane; When
+	            attaching, the pane may be very wide and the current pane 
+	            squeezed to the left, just resize with tmux commands.
 
 	push        Detaches the current side-pane, or current tmux pane, and 
 	            pushes it to a _one_room_ sized stack; you can not push
@@ -1230,6 +1284,7 @@ run_as_command()
 [[ "import"  == "$1" ]] && tmuxake-import $2
 [[ "push"  == "$1" ]] && tmuxake-push $2
 [[ "pop"  == "$1" ]] && tmuxake-pop $2
+[[ "break"  == "$1" ]] && tmuxake-break $2
 
 [[ "status"  == "$1" ]] && tmuxake-status
 [[ "status2"  == "$1" ]] && tmuxake-status-two
