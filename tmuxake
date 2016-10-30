@@ -19,7 +19,7 @@ switch_back_to_root_pane=0
 
 warn() { echo "$*" >&2; }
 
-parse_it () 
+parse_it() 
 {
 parse_it_regex=$1
 parse_it_string=$2
@@ -636,7 +636,6 @@ fi
 tmux refresh-client -S
 }
 
-
 tmuxake-check()
 {
 mirror=$(tmuxake-session-name)
@@ -662,6 +661,37 @@ if tmux has-session -t "$mirror" 2> /dev/null ; then
 		fi	
 	done
 fi
+}
+
+tmuxake-check-pane-pid()
+{
+pid_to_check=$1
+status=""
+
+mirror=$(tmuxake-session-name)
+
+if tmux has-session -t "$mirror" 2> /dev/null ; then
+	for name in $(tmux list-windows -t "$mirror" -F '#{window_name}') ; do
+		if [[ ! $name == 'tmuxake' ]] ; then
+			parse_it '(.+)-([[:digit:]]+)@(.*)@(.*)' "$name" \
+				pane_pid side_pane_pid layout date
+			
+			if [[ $pid_to_check == $pane_pid || $pid_to_check == $side_pane_pid ]] ; then
+				status="$pane_pid-$side_pane_pid@$layout@$date"
+
+				if [[ $pane_pid =~ ^([[:digit:]]+)$ ]] ; then
+					! kill -0 $pane_pid > /dev/null 2>&1 && \
+						status+=" ${red}*root-pane process not running '$pane_pid'$reset"
+				fi
+
+				! kill -0 $side_pane_pid > /dev/null 2>&1 && \
+					status+=" ${yellow}*side-pane process not running '$side_pane_pid'$reset"
+			fi
+		fi	
+	done
+fi
+
+echo "$status"
 }
 
 tmuxake-kill()
@@ -878,6 +908,17 @@ status=""
 if tmux has-session -t $(tmuxake-session-name) 2> /dev/null ; then
 	pane_pid=$(tmux display-message -p '#{pane_pid}')
 
+	echo "`tmuxake-status-pane-pid $pane_pid`"
+fi
+}
+
+tmuxake-status-pane-pid()
+{
+pane_pid=$1
+
+status=""
+
+if tmux has-session -t $(tmuxake-session-name) 2> /dev/null ; then
 	if pane_mirror_name=$(tmuxake-has-side-pane $pane_pid) ; then
 		parse_it '([[:digit:]]+)-([[:digit:]]+)@(.*)@(.*)' "$pane_mirror_name" \
 			pane_pid side_pane_pid layout date
@@ -899,9 +940,9 @@ if tmux has-session -t $(tmuxake-session-name) 2> /dev/null ; then
 			status=$(tmuxake-is-mirror)
 		fi
 	fi
-fi
 
-echo "$status"
+	echo "$status"
+fi
 }
 
 tmuxake-status-two()
@@ -973,6 +1014,13 @@ cat << 'EOQ'
 
 EOQ
 
+}
+
+tmuxake-cleanup()
+{
+while read x; do unset -f  $x; done << EOF
+	$(declare -F | grep tmuxake- | sed 's/declare -f//')
+EOF
 }
 
 tmuxake-bash-completion()
@@ -1262,7 +1310,6 @@ EOH
 
 }
 
-
 # run as command
 
 run_as_command()
@@ -1292,9 +1339,5 @@ run_as_command()
 [[ '--help' == $1 ||  '-h' == $1 ]] && tmuxake-help
 }
 
-run_as_command $@
+if [[ ! -n $USE_TMUXAKE_LIB ]] ; then run_as_command $@ ; tmuxake-cleanup ; fi
 
-# remove our functions from the sell bash
-while read x; do unset -f  $x; done << EOF
-	$(declare -F | grep tmuxake- | sed 's/declare -f//')
-EOF
