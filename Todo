@@ -1,6 +1,10 @@
 tmuxake
 -------
 
+replace current with orphan
+
+color if any
+
 test positioning of non full side pane via bindings
 
 don't blindly kill panes
@@ -11,4 +15,3 @@ tweek the size of root-panes after side-panes are hidden, it is
 	sometimes difficult to understand how tmux resize panes
 	when a pane is closed
 
-add TMUXAKE status to tmux-pid

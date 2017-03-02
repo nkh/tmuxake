@@ -651,11 +651,11 @@ if tmux has-session -t "$mirror" 2> /dev/null ; then
 
 			if [[ $pane_pid =~ ^([[:digit:]]+)$ ]] ; then
 				! kill -0 $pane_pid > /dev/null 2>&1 && \
-					printf " ${red}*root-pane process not running '$pane_pid'$reset"
+					printf " ${RED}*root-pane process not running '$pane_pid'$RESET"
 			fi
 
 			! kill -0 $side_pane_pid > /dev/null 2>&1 && \
-				printf " ${yellow}*side-pane process not running '$side_pane_pid'$reset"
+				printf " ${YELLOW}*side-pane process not running '$side_pane_pid'$RESET"
 
 			printf "\n"
 		fi	
@@ -681,11 +681,11 @@ if tmux has-session -t "$mirror" 2> /dev/null ; then
 
 				if [[ $pane_pid =~ ^([[:digit:]]+)$ ]] ; then
 					! kill -0 $pane_pid > /dev/null 2>&1 && \
-						status+=" ${red}*root-pane process not running '$pane_pid'$reset"
+						status+=" ${RED}*root-pane process not running '$pane_pid'$RESET"
 				fi
 
 				! kill -0 $side_pane_pid > /dev/null 2>&1 && \
-					status+=" ${yellow}*side-pane process not running '$side_pane_pid'$reset"
+					status+=" ${YELLOw}*side-pane process not running '$side_pane_pid'$RESET"
 			fi
 		fi	
 	done
@@ -1104,20 +1104,20 @@ BINDINGS
 	# minimum bindings
 	# you will need to change the path to your path
 
-	bind Tab run "/home/nadim/nadim/bin/tmuxake toggle"
-	bind BSpace run "/home/nadim/nadim/bin/tmuxake close" 
+	bind Tab run "/full/path/to/tmuxake toggle"
+	bind BSpace run "/full/path/to/tmuxake close" 
 
 	# extra binding for positioning creating a full-size side-pane
-	bind C-a run "/home/nadim/nadim/bin/tmuxake full" 
+	bind C-a run "/full/path/to/tmuxake full" 
 
 	# extra bindings for positioning, if you are happy having a right pane
 	# only or if you can manage position via commands, these are not needed
 
-	bind C-t run "/home/nadim/nadim/bin/tmuxake position t" 
-	bind C-b run "/home/nadim/nadim/bin/tmuxake position b" 
-	bind C-l run "/home/nadim/nadim/bin/tmuxake position l" 
-	bind C-r run "/home/nadim/nadim/bin/tmuxake position r" 
-	bind C-f run "/home/nadim/nadim/bin/tmuxake position f" 
+	bind C-t run "/full/path/to/tmuxake position t" 
+	bind C-b run "/full/path/to/tmuxake position b" 
+	bind C-l run "/full/path/to/tmuxake position l" 
+	bind C-r run "/full/path/to/tmuxake position r" 
+	bind C-f run "/full/path/to/tmuxake position f" 
 
 COMMANDS
 	
